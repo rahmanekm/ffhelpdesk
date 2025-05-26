@@ -497,8 +497,6 @@ def delete_ticket(ticket_id):
     except Exception as e:
         db.session.rollback()
         flash('An error occurred while deleting the ticket.', 'danger')
-        current_app.logger.error(
-            f'Error deleting ticket {ticket_id}: {
-                str(e)}')
+        current_app.logger.error(f'Error deleting ticket {ticket_id}: {str(e)}')
 
     return redirect(url_for('main.dashboard'))
