@@ -269,9 +269,8 @@ def merge_tickets(ticket_id):
 
             db.session.commit()
             flash(
-                f'Ticket #{
-                    source_ticket.id} has been merged into ticket #{
-                    target_ticket.id}.')
+                f'Ticket #{source_ticket.id} has been merged into ticket #{target_ticket.id}.'
+            )
             return redirect(
                 url_for(
                     '.view_ticket',

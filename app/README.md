@@ -78,38 +78,148 @@ pip install -r requirements.txt
 
 ## 5. Set Environment Variables
 
-Your application requires several environment variables for production, as defined in `app/config.py`. These should be set securely on the server. **Do not hardcode them into your application or commit them to version control.**
+Your application requires several environment variables for production, as defined in `app/config.py`. These variables control critical settings like database connections, secret keys, and email server details. **It is crucial to set these securely on the server and never hardcode them into your application or commit them to version control (especially sensitive ones like passwords or secret keys).**
 
-A common way to manage these is using a `.env` file that Gunicorn can load via the systemd service, or by setting them directly in the systemd service file.
+**Required Environment Variables (from `app/config.py`):**
 
-**Required Environment Variables:**
+*   `SECRET_KEY`: A long, random, and unique string used for session signing and cryptographic security.
+    *   **How to generate**: `python3 -c 'import secrets; print(secrets.token_hex(32))'`
+    *   **Example value**: `a1b2c3d4e5f60708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20` (Use your own generated one!)
+*   `DATABASE_URL`: The connection string for your PostgreSQL (or other) production database.
+    *   **Format**: `postgresql://DB_USER:DB_PASSWORD@DB_HOST:DB_PORT/DB_NAME`
+    *   **Example value (PostgreSQL)**: `postgresql://helpdesk_user:your_secure_password@localhost:5432/helpdesk_prod`
+*   `MAIL_SERVER`: The hostname or IP address of your SMTP mail server.
+    *   **Example value**: `smtp.example.com` or `smtp.googlemail.com`
+*   `MAIL_PORT`: The port number for your SMTP mail server.
+    *   **Example value**: `587` (for TLS) or `465` (for SSL)
+*   `MAIL_USE_TLS`: Whether to use TLS encryption for email. Set to `true` or `false`.
+    *   **Example value**: `true`
+*   `MAIL_USERNAME`: The username for authenticating with your mail server.
+    *   **Example value**: `user@example.com`
+*   `MAIL_PASSWORD`: The password for authenticating with your mail server. Consider using app-specific passwords if your provider supports them (e.g., Gmail).
+    *   **Example value**: `your_mail_password`
+*   `FLASK_CONFIG`: Set this to `production` to ensure the application loads the `ProductionConfig` settings from `app/config.py`.
+    *   **Example value**: `production`
+*   `LOG_TO_STDOUT` (Optional, from `ProductionConfig`): If set (e.g., to `true`), might configure logging to standard output, useful for containerized environments.
 
-*   `SECRET_KEY`: A long, random, and unique string. Generate one using `python -c 'import secrets; print(secrets.token_hex(32))'`.
-*   `DATABASE_URL`: The connection string for your PostgreSQL database.
-    Example: `postgresql://helpdesk_user:your_strong_password@localhost/helpdesk_prod`
-*   `MAIL_SERVER`: e.g., `smtp.googlemail.com`
-*   `MAIL_PORT`: e.g., `587`
-*   `MAIL_USE_TLS`: `true` or `false`
-*   `MAIL_USERNAME`: Your email username.
-*   `MAIL_PASSWORD`: Your email password (or an app-specific password if using Gmail/OAuth).
-*   `FLASK_CONFIG`: Set this to `production` to ensure the correct configuration is loaded.
+**Methods for Setting Environment Variables on the Server:**
 
-**Method 1: Using an `.env` file (Recommended for Gunicorn/Systemd)**
+There are several ways to provide these environment variables to your application. The choice depends on your setup and preferences.
 
-1.  Create a `.env` file in your project root (`/srv/helpdesk/.env`):
+**Method 1: Using an `.env` file with Systemd (Recommended for this Setup)**
+
+This is often the cleanest approach when using systemd to manage your Gunicorn service. The systemd service file can be configured to load variables from a specified `.env` file.
+
+1.  **Create the `.env` file**:
+    In your project root on the server (e.g., `/srv/helpdesk/.env`), create the file:
+    ```bash
+    sudo nano /srv/helpdesk/.env
     ```
-    SECRET_KEY='your_generated_secret_key'
-    DATABASE_URL='postgresql://helpdesk_user:your_strong_password@localhost/helpdesk_prod'
+    Add your variables, one per line, in `KEY='VALUE'` format. **Do not use spaces around the `=` sign.** Comments can be added using `#`.
+
+    **Example `/srv/helpdesk/.env` content:**
+    ```env
+    # Flask Application Settings
+    FLASK_CONFIG='production'
+    SECRET_KEY='your_very_long_and_random_secret_key_generated_above'
+
+    # Database Configuration
+    DATABASE_URL='postgresql://helpdesk_user:P@$$wOrd123!@localhost:5432/helpdesk_prod'
+
+    # Email Configuration
     MAIL_SERVER='smtp.googlemail.com'
     MAIL_PORT='587'
     MAIL_USE_TLS='true'
-    MAIL_USERNAME='your_email_username'
-    MAIL_PASSWORD='your_email_password'
-    FLASK_CONFIG='production'
-    # Add any other environment variables your app needs
+    MAIL_USERNAME='your.email@gmail.com'
+    MAIL_PASSWORD='your_gmail_app_password_or_regular_password' # Use App Password for Gmail
+
+    # Optional Logging
+    # LOG_TO_STDOUT='true'
     ```
-2.  **Secure this file**: `sudo chmod 600 /srv/helpdesk/.env` and ensure it's owned by the user running the application.
-3.  **Ensure `.env` is in your `.gitignore` file** to prevent committing it.
+
+2.  **Secure the `.env` file**:
+    Since this file contains sensitive credentials, restrict its permissions:
+    ```bash
+    sudo chmod 600 /srv/helpdesk/.env
+    ```
+    Ensure the file is owned by the user that will run the Gunicorn process (e.g., `your_sudo_user` as specified in the systemd service file).
+    ```bash
+    sudo chown your_sudo_user:your_sudo_user /srv/helpdesk/.env
+    ```
+
+3.  **Ensure `.env` is in your `.gitignore` file**:
+    This is critical to prevent accidentally committing sensitive credentials to your Git repository. The provided `.gitignore` should already include `.env`.
+
+4.  **Configure Systemd to use the `.env` file**:
+    In your systemd service file (e.g., `/etc/systemd/system/helpdesk.service`), you'll use the `EnvironmentFile` directive:
+    ```ini
+    [Service]
+    # ... other settings ...
+    User=your_sudo_user
+    Group=www-data
+    WorkingDirectory=/srv/helpdesk
+    EnvironmentFile=/srv/helpdesk/.env  # This line loads the variables
+    ExecStart=/srv/helpdesk/venv/bin/gunicorn --workers 3 --bind unix:helpdesk.sock -m 007 wsgi:application
+    # ...
+    ```
+    After modifying the systemd service file, reload systemd: `sudo systemctl daemon-reload`.
+
+**Method 2: Directly in the Systemd Service File**
+
+You can set environment variables directly within the systemd service file using the `Environment` directive. This is less flexible for managing many variables but can be suitable for a few.
+
+1.  **Edit the systemd service file**:
+    ```bash
+    sudo nano /etc/systemd/system/helpdesk.service
+    ```
+2.  Add `Environment` directives within the `[Service]` section:
+    ```ini
+    [Service]
+    # ... other settings ...
+    User=your_sudo_user
+    WorkingDirectory=/srv/helpdesk
+    Environment="FLASK_CONFIG=production"
+    Environment="SECRET_KEY=your_very_long_and_random_secret_key"
+    Environment="DATABASE_URL=postgresql://helpdesk_user:your_password@localhost/helpdesk_prod"
+    # Add other variables similarly...
+    ExecStart=/srv/helpdesk/venv/bin/gunicorn --workers 3 --bind unix:helpdesk.sock -m 007 wsgi:application
+    # ...
+    ```
+    **Note**: Values with spaces should be enclosed in quotes.
+
+3.  **Reload systemd**: `sudo systemctl daemon-reload`.
+
+**Method 3: System-wide or User-specific Bash Profile (Less Recommended for Service Credentials)**
+
+You can set environment variables in files like `/etc/environment` (system-wide) or `~/.bashrc`, `~/.profile` (user-specific).
+*   **`/etc/environment`**: Variables set here are available to all users and processes. Format is `KEY="VALUE"`. You'll need to reboot or re-login for changes to take full effect for all processes.
+*   **User profiles (`~/.bashrc`, `~/.profile`)**: Variables are set using `export KEY="VALUE"`. These are typically loaded for interactive shell sessions, not always reliably for systemd services unless explicitly sourced or inherited.
+
+**Why this method is less recommended for service credentials:**
+*   Broader scope: Variables in `/etc/environment` are globally visible, which might be a security concern for sensitive data.
+*   User profile variables might not be available to the systemd service environment unless the service is run as that user and configured to inherit the shell environment, which can be complex.
+*   Harder to manage per-application settings.
+
+**Method 4: For Temporary Testing / CLI Commands (Not for Production Services)**
+
+For running one-off commands like `flask db upgrade` in your shell, you can temporarily set environment variables for that session:
+
+```bash
+export FLASK_CONFIG='production'
+export DATABASE_URL='postgresql://user:pass@host/db'
+# ... set other necessary variables ...
+flask --app app/__init__.py db upgrade
+```
+These variables will only persist for the current terminal session. **This is not suitable for running your Gunicorn service.**
+
+**Security Considerations:**
+*   **Principle of Least Privilege**: Ensure the `.env` file or systemd service file has the minimum necessary permissions.
+*   **Avoid Hardcoding**: Never write secrets directly into your application code or commit them to version control.
+*   **Strong Credentials**: Use strong, unique passwords and secret keys.
+*   **Regular Audits**: Periodically review who has access to your server and configuration files.
+*   **Secrets Management Tools (Advanced)**: For more complex deployments or higher security needs, consider tools like HashiCorp Vault, AWS Secrets Manager, or Azure Key Vault. These are generally beyond the scope of a basic deployment but are good to be aware of.
+
+Choose the method that best fits your workflow and security requirements. For this guide, **Method 1 (using an `.env` file with Systemd)** is integrated into the subsequent steps.
 
 ## 6. Run Database Migrations
 
