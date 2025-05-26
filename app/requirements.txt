@@ -7,3 +7,5 @@ Flask-WTF
 WTForms
 PyJWT
 Werkzeug
+
+gunicorn
